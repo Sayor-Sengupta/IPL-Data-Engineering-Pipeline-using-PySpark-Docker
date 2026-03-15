@@ -47,6 +47,8 @@ The main goal of this project is to understand:
 
 ---
 
+## Dataset used
+https://www.kaggle.com/datasets/chaitu20/ipl-dataset2008-2025
 
 ---
 
