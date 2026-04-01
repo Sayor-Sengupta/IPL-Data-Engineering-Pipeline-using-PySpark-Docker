@@ -3,3 +3,8 @@ data/raw/*
 data/bronze/*
 data/silver/*
 data/gold/*
+.env
+logs
+dags/_pycache_
+
+

@@ -2,85 +2,84 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 
-spark = SparkSession.builder \
-    .appName("IPL Gold Layer Job") \
-    .getOrCreate()
+def main():
 
-# Read Silver Data
-df = spark.read.parquet("data/silver/ipl_cleaned")
+    spark = SparkSession.builder \
+        .master("spark://spark-master:7077") \
+        .appName("IPL Gold Layer Job") \
+        .getOrCreate()
 
-# Optimization
-df = df.repartition(8, "year")
-df.cache()
+    df = spark.read.parquet("/opt/spark-app/data/silver/ipl_cleaned")
 
-# Batter Stats
+    df = df.repartition(8, "year")
 
-batter_stats = df.groupBy("year","batter").agg(
-    sum("runs_batter").alias("total_runs"),
-    count("*").alias("balls"),
-    sum("is_boundary").alias("boundaries")
-)
+    # ---------------- BATTER ----------------
+    batter_stats = df.groupBy("year","batter").agg(
+        sum("runs_batter").alias("total_runs"),
+        count("*").alias("balls"),
+        sum("is_boundary").alias("boundaries")
+    )
 
-batter_stats = batter_stats.withColumn(
-    "strike_rate",
-    round((col("total_runs") / col("balls")) * 100, 2)
-)
+    batter_stats = batter_stats.withColumn(
+        "strike_rate",
+        round((col("total_runs") / col("balls")) * 100, 2)
+    )
 
-window_spec = Window.partitionBy("year").orderBy(desc("total_runs"))
+    window_spec = Window.partitionBy("year").orderBy(desc("total_runs"))
 
-batter_stats = batter_stats.withColumn(
-    "rank",
-    dense_rank().over(window_spec)
-)
+    batter_stats = batter_stats.withColumn(
+        "rank",
+        dense_rank().over(window_spec)
+    )
 
-batter_stats.write.mode("overwrite") \
-    .partitionBy("year") \
-    .parquet("data/gold/batter_stats")
+    batter_stats.write.mode("overwrite") \
+        .partitionBy("year") \
+        .parquet("/opt/spark-app/data/gold/batter_stats")
 
-#  Bowler Stats 
+    # ---------------- BOWLER ----------------
+    bowler_stats = df.groupBy("year","bowler").agg(
+        sum("runs_total").alias("runs_conceded"),
+        count("*").alias("balls"),
+        sum("is_wicket").alias("wickets")
+    )
 
-bowler_stats = df.groupBy("year","bowler").agg(
-    sum("runs_total").alias("runs_conceded"),
-    count("*").alias("balls"),
-    sum("is_wicket").alias("wickets")
-)
+    bowler_stats = bowler_stats.withColumn(
+        "economy",
+        round(col("runs_conceded") / (col("balls") / 6), 2)
+    )
 
-bowler_stats = bowler_stats.withColumn(
-    "economy",
-    round(col("runs_conceded") / (col("balls") / 6), 2)
-)
+    window_spec2 = Window.partitionBy("year").orderBy(desc("wickets"))
 
-window_spec2 = Window.partitionBy("year").orderBy(desc("wickets"))
+    bowler_stats = bowler_stats.withColumn(
+        "rank",
+        dense_rank().over(window_spec2)
+    )
 
-bowler_stats = bowler_stats.withColumn(
-    "rank",
-    dense_rank().over(window_spec2)
-)
+    bowler_stats.write.mode("overwrite") \
+        .partitionBy("year") \
+        .parquet("/opt/spark-app/data/gold/bowler_stats")
 
-bowler_stats.write.mode("overwrite") \
-    .partitionBy("year") \
-    .parquet("data/gold/bowler_stats")
+    # ---------------- MATCH ----------------
+    match_summary = df.groupBy("match_id","year","venue").agg(
+        sum("runs_total").alias("match_total_runs"),
+        sum("is_wicket").alias("total_wickets")
+    )
 
-#  Match Summary 
+    match_summary.write.mode("overwrite") \
+        .partitionBy("year") \
+        .parquet("/opt/spark-app/data/gold/match_summary")
 
-match_summary = df.groupBy("match_id","year","venue").agg(
-    sum("runs_total").alias("match_total_runs"),
-    sum("is_wicket").alias("total_wickets")
-)
+    # ---------------- VENUE ----------------
+    venue_stats = df.groupBy("venue","year").agg(
+        avg("runs_total").alias("avg_runs"),
+        countDistinct("match_id").alias("matches")
+    )
 
-match_summary.write.mode("overwrite") \
-    .partitionBy("year") \
-    .parquet("data/gold/match_summary")
+    venue_stats.write.mode("overwrite") \
+        .partitionBy("year") \
+        .parquet("/opt/spark-app/data/gold/venue_stats")
 
-#  Venue Stats 
+    spark.stop()
 
-venue_stats = df.groupBy("venue","year").agg(
-    avg("runs_total").alias("avg_runs"),
-    countDistinct("match_id").alias("matches")
-)
-
-venue_stats.write.mode("overwrite") \
-    .partitionBy("year") \
-    .parquet("data/gold/venue_stats")
-
-spark.stop()
+if __name__ == "__main__":
+    main()
